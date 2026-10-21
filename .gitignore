@@ -1,0 +1,46 @@
+# ─── Environment & Secrets ────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ─── Go ───────────────────────────────────────────────────────────────────────
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/vendor/
+services/payment/tmp/
+
+# ─── Node / npm ───────────────────────────────────────────────────────────────
+node_modules/
+dist/
+build/
+.npm
+*.tsbuildinfo
+
+# ─── React / Vite ─────────────────────────────────────────────────────────────
+apps/web/dist/
+apps/web/.vite/
+
+# ─── Docker ───────────────────────────────────────────────────────────────────
+deployments/.postgres-data/
+deployments/.rabbitmq-data/
+
+# ─── OS & IDE ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── Test Artifacts ───────────────────────────────────────────────────────────
+coverage/
+*.coverprofile

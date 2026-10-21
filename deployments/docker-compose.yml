@@ -1,0 +1,134 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fingo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fingo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_DB: ${POSTGRES_DB:-fingo}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fingo} -d ${POSTGRES_DB:-fingo}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: fingo-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-fingo}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-change-me}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-/}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  migrate:
+    image: migrate/migrate:v4.18.3
+    container_name: fingo-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../migrations:/migrations:ro
+    command:
+      - -path
+      - /migrations
+      - -database
+      - postgres://${POSTGRES_USER:-fingo}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-fingo}?sslmode=disable
+      - up
+    restart: "no"
+
+  payment-api:
+    build:
+      context: ../services/payment
+      dockerfile: Dockerfile
+      target: api
+    container_name: fingo-payment-api
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-fingo}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-fingo}?sslmode=disable
+      PAYMENT_SERVICE_PORT: ${PAYMENT_SERVICE_PORT:-8080}
+      PAYMENT_SERVICE_ENV: ${PAYMENT_SERVICE_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      PROVIDER_DEFAULT_OUTCOME: ${PROVIDER_DEFAULT_OUTCOME:-success}
+      PROVIDER_RECONCILE_OUTCOME: ${PROVIDER_RECONCILE_OUTCOME:-success}
+      PROVIDER_TIMEOUT_MS: ${PROVIDER_TIMEOUT_MS:-3000}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "/payment-api", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  payment-worker:
+    build:
+      context: ../services/payment
+      dockerfile: Dockerfile
+      target: worker
+    container_name: fingo-payment-worker
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-fingo}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-fingo}?sslmode=disable
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-fingo}:${RABBITMQ_PASSWORD:-change-me}@rabbitmq:5672/
+      PAYMENT_SERVICE_ENV: ${PAYMENT_SERVICE_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      PROVIDER_DEFAULT_OUTCOME: ${PROVIDER_DEFAULT_OUTCOME:-success}
+      PROVIDER_RECONCILE_OUTCOME: ${PROVIDER_RECONCILE_OUTCOME:-success}
+      PROVIDER_TIMEOUT_MS: ${PROVIDER_TIMEOUT_MS:-3000}
+
+  api-gateway:
+    build:
+      context: ../services/api-gateway
+      dockerfile: Dockerfile
+    container_name: fingo-api-gateway
+    restart: unless-stopped
+    depends_on:
+      payment-api:
+        condition: service_healthy
+    environment:
+      GATEWAY_PORT: ${GATEWAY_PORT:-3000}
+      PAYMENT_SERVICE_URL: http://payment-api:8080
+      NODE_ENV: ${PAYMENT_SERVICE_ENV:-development}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:5173}
+    ports:
+      - "3000:3000"
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+    container_name: fingo-web
+    restart: unless-stopped
+    depends_on:
+      - api-gateway
+    environment:
+      VITE_API_BASE_URL: http://localhost:3000/api
+    ports:
+      - "5173:5173"
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
